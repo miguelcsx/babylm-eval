@@ -196,14 +196,14 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def _check_validity_of_dirs(args):
-    # First check the validity of the full evaluation directory
-    assert _check_validity_of_dir(args, args.revision_name, fast=False), "The directory for full results is incorrect, please fix the errors!"
+    if not _check_validity_of_dir(args, args.revision_name, fast=False):
+        print("Warning: Some full evaluation tasks are missing and will be set to None.")
 
-    # Next check the validity of the fast evaluation directories
     if args.fast:
         revision_list = STRICT_SMALL_FAST_REVISIONS if args.track == "strict-small" else OTHER_FAST_REVISIONS
         for revision_name in revision_list:
-            assert _check_validity_of_dir(args, revision_name, fast=True), f"The directory for revision {revision_name} is incorrect for fast evals, please fix the errors!"
+            if not _check_validity_of_dir(args, revision_name, fast=True):
+                print(f"Warning: Some fast evaluation tasks are missing for revision {revision_name} and will be set to None.")
 
 
 def _check_validity_of_dir(args: argparse.Namespace, revision_name: str, fast: bool) -> bool:
@@ -368,6 +368,18 @@ def _load_results_devbench(path: pathlib.Path) -> np.array[float]:
     return results
 
 
+def _try_load_results(path: pathlib.Path, label: str, check_fn=None):
+    try:
+        results = _load_results(path)
+    except FileNotFoundError:
+        print(f"Warning: {label} predictions not found at {path}, setting to None")
+        return None
+    if check_fn is not None and not check_fn(results):
+        print(f"Warning: {label} data has incorrect size, setting to None")
+        return None
+    return results
+
+
 def collate_preds(args: argparse.Namespace) -> None:
     _check_validity_of_dirs(args)
 
@@ -391,39 +403,25 @@ def collate_full_eval_preds(args):
     fine_main_path: pathlib.Path = args.results_dir / args.model_path_or_name.stem / args.revision_name / "finetune"
 
     # BLiMP
-    blimp_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "blimp" / "blimp_filtered" / "predictions.json")
-    assert _check_size("blimp", blimp_results, fast=False), "The BLiMP data is incorrect"
-    full_results["blimp"] = blimp_results
+    full_results["blimp"] = _try_load_results(zero_main_path / "blimp" / "blimp_filtered" / "predictions.json", "BLiMP", lambda r: _check_size("blimp", r, False))
 
     # BLiMP Supplement
-    bsupp_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "blimp" / "supplement_filtered" / "predictions.json")
-    assert _check_size("blimp_supplement", bsupp_results, fast=False), "The BLiMP Supplement data is incorrect"
-    full_results["blimp_supplement"] = bsupp_results
+    full_results["blimp_supplement"] = _try_load_results(zero_main_path / "blimp" / "supplement_filtered" / "predictions.json", "BLiMP Supplement", lambda r: _check_size("blimp_supplement", r, False))
 
     # EWoK
-    ewok_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "ewok" / "ewok_filtered" / "predictions.json")
-    assert _check_size("ewok", ewok_results, fast=False), "The EWoK data is incorrect"
-    full_results["ewok"] = ewok_results
+    full_results["ewok"] = _try_load_results(zero_main_path / "ewok" / "ewok_filtered" / "predictions.json", "EWoK", lambda r: _check_size("ewok", r, False))
 
     # Entity Tracking
-    et_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "entity_tracking" / "entity_tracking" / "predictions.json")
-    assert _check_size("entity_tracking", et_results, fast=False), "The Entity Tracking data is incorrect"
-    full_results["entity_tracking"] = et_results
+    full_results["entity_tracking"] = _try_load_results(zero_main_path / "entity_tracking" / "entity_tracking" / "predictions.json", "Entity Tracking", lambda r: _check_size("entity_tracking", r, False))
 
     # COMPS
-    comps_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "comps" / "comps" / "predictions.json")
-    assert _check_size("comps", comps_results, fast=False), "The COMPS data is incorrect"
-    full_results["comps"] = comps_results
+    full_results["comps"] = _try_load_results(zero_main_path / "comps" / "comps" / "predictions.json", "COMPS", lambda r: _check_size("comps", r, False))
 
     # Reading
-    read_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "reading" / "predictions.json")
-    assert _check_size("reading", read_results, fast=False), "The Reading data is incorrect"
-    full_results["reading"] = read_results
+    full_results["reading"] = _try_load_results(zero_main_path / "reading" / "predictions.json", "Reading", lambda r: _check_size("reading", r, False))
 
-    # Reading
-    aoa_results = _load_results(zero_main_path / "AoA_word" / "surprisal.json")
-    assert _check_size_aoa(args, aoa_results), "The AoA word data is incorrect"
-    full_results["aoa"] = aoa_results
+    # AoA
+    full_results["aoa"] = _try_load_results(zero_main_path / "AoA_word" / "surprisal.json", "AoA word", lambda r: _check_size_aoa(args, r))
 
     # GLUE
     full_results["glue"] = {}
@@ -431,39 +429,56 @@ def collate_full_eval_preds(args):
     glue_tasks = ["boolq", "mnli", "mrpc", "multirc", "qqp", "rte", "wsc"]
 
     for gt in glue_tasks:
-        read_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(fine_main_path / gt / "predictions.json")
-        assert _check_size(gt, read_results, fast=False), f"The {gt} data is incorrect"
-        full_results["glue"] |= read_results
+        result = _try_load_results(fine_main_path / gt / "predictions.json", gt.upper(), lambda r, t=gt: _check_size(t, r, False))
+        if result is not None:
+            full_results["glue"] |= result
 
     if args.multimodal:
         # Multi-Modal
         # VQA
-        read_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "vqa" / "vqa_filtered" / "predictions.json")
-        assert _check_size("vqa", read_results, fast=False), "The VQA data is incorrect"
-        full_results["vqa"] = read_results
+        full_results["vqa"] = _try_load_results(zero_main_path / "vqa" / "vqa_filtered" / "predictions.json", "VQA", lambda r: _check_size("vqa", r, False))
 
         # Winoground
-        read_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(zero_main_path / "winoground" / "winoground_filtered" / "predictions.json")
-        assert _check_size("winoground", read_results, fast=False), "The Winoground data is incorrect"
-        full_results["winoground"] = read_results
+        full_results["winoground"] = _try_load_results(zero_main_path / "winoground" / "winoground_filtered" / "predictions.json", "Winoground", lambda r: _check_size("winoground", r, False))
 
         # DevBench
-        # Visual vocabulary
-        full_results['devbench'] = {'lex-viz_visual' : {}, 'trog' : {}, 'things' : {}}
+        full_results['devbench'] = {'lex-viz_visual': {}, 'trog': {}, 'things': {}}
 
-        read_results: np.array[float] = _load_results_devbench(devbench_path / "devbench" / "lex-viz_vocab.npy")
-        assert _check_size_devbench("lex-viz_vocab", read_results), "The DevBench Visual vocabulary data is incorrect"
-        full_results["devbench"]["lex-viz_visual"]["predictions"] = read_results.tolist()
+        # Visual vocabulary
+        try:
+            read_results = _load_results_devbench(devbench_path / "devbench" / "lex-viz_vocab.npy")
+            if not _check_size_devbench("lex-viz_vocab", read_results):
+                print("Warning: DevBench Visual vocabulary data has incorrect size, setting to None")
+                full_results["devbench"]["lex-viz_visual"]["predictions"] = None
+            else:
+                full_results["devbench"]["lex-viz_visual"]["predictions"] = read_results.tolist()
+        except FileNotFoundError:
+            print("Warning: DevBench Visual vocabulary data not found, setting to None")
+            full_results["devbench"]["lex-viz_visual"]["predictions"] = None
 
         # TROG
-        read_results: np.array[float] = _load_results_devbench(devbench_path / "devbench" / "gram-trog.npy")
-        assert _check_size_devbench("trog", read_results), "The DevBench TROG data is incorrect"
-        full_results["devbench"]["trog"]["predictions"] = read_results.tolist()
+        try:
+            read_results = _load_results_devbench(devbench_path / "devbench" / "gram-trog.npy")
+            if not _check_size_devbench("trog", read_results):
+                print("Warning: DevBench TROG data has incorrect size, setting to None")
+                full_results["devbench"]["trog"]["predictions"] = None
+            else:
+                full_results["devbench"]["trog"]["predictions"] = read_results.tolist()
+        except FileNotFoundError:
+            print("Warning: DevBench TROG data not found, setting to None")
+            full_results["devbench"]["trog"]["predictions"] = None
 
         # Things
-        read_results: np.array[float] = _load_results_devbench(devbench_path / "devbench" / "sem-things_pairwise_sims.npy")
-        assert _check_size_devbench("things", read_results), "The DevBench things data is incorrect"
-        full_results["devbench"]["things"]["predictions"] = read_results.tolist()
+        try:
+            read_results = _load_results_devbench(devbench_path / "devbench" / "sem-things_pairwise_sims.npy")
+            if not _check_size_devbench("things", read_results):
+                print("Warning: DevBench things data has incorrect size, setting to None")
+                full_results["devbench"]["things"]["predictions"] = None
+            else:
+                full_results["devbench"]["things"]["predictions"] = read_results.tolist()
+        except FileNotFoundError:
+            print("Warning: DevBench things data not found, setting to None")
+            full_results["devbench"]["things"]["predictions"] = None
 
     return full_results
 
@@ -487,29 +502,24 @@ def get_revision_fast_eval_metrics(args, revision_name):
     data_path: pathlib.Path = args.fast_eval_dir
 
     # BLiMP
-    blimp_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(main_path / "blimp" / "blimp_fast" / "predictions.json")
-    assert _check_size("blimp", blimp_results, True), "The BLiMP Fast data is incorrect"
-    revision_results["blimp"] = _calculate_target_results(blimp_results, "blimp", data_path / "blimp_fast")
+    blimp_results = _try_load_results(main_path / "blimp" / "blimp_fast" / "predictions.json", "BLiMP Fast", lambda r: _check_size("blimp", r, True))
+    revision_results["blimp"] = _calculate_target_results(blimp_results, "blimp", data_path / "blimp_fast") if blimp_results is not None else None
 
     # BLiMP Supplement
-    bsupp_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(main_path / "blimp" / "supplement_fast" / "predictions.json")
-    assert _check_size("blimp_supplement", bsupp_results, True), "The BLiMP Supplement Fast data is incorrect"
-    revision_results["blimp_supplement"] = _calculate_target_results(bsupp_results, "blimp_supplement", data_path / "supplement_fast")
+    bsupp_results = _try_load_results(main_path / "blimp" / "supplement_fast" / "predictions.json", "BLiMP Supplement Fast", lambda r: _check_size("blimp_supplement", r, True))
+    revision_results["blimp_supplement"] = _calculate_target_results(bsupp_results, "blimp_supplement", data_path / "supplement_fast") if bsupp_results is not None else None
 
     # EWoK
-    ewok_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(main_path / "ewok" / "ewok_fast" / "predictions.json")
-    assert _check_size("ewok", ewok_results, True), "The EWoK Fast data is incorrect"
-    revision_results["ewok"] = _calculate_target_results(ewok_results, "ewok", data_path / "ewok_fast")
+    ewok_results = _try_load_results(main_path / "ewok" / "ewok_fast" / "predictions.json", "EWoK Fast", lambda r: _check_size("ewok", r, True))
+    revision_results["ewok"] = _calculate_target_results(ewok_results, "ewok", data_path / "ewok_fast") if ewok_results is not None else None
 
     # Entity Tracking
-    et_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(main_path / "entity_tracking" / "entity_tracking_fast" / "predictions.json")
-    assert _check_size("entity_tracking", et_results, True), "The Entity Tracking Fast data is incorrect"
-    revision_results["entity_tracking"] = _calculate_target_et_results(et_results, data_path / "entity_tracking_fast")
+    et_results = _try_load_results(main_path / "entity_tracking" / "entity_tracking_fast" / "predictions.json", "Entity Tracking Fast", lambda r: _check_size("entity_tracking", r, True))
+    revision_results["entity_tracking"] = _calculate_target_et_results(et_results, data_path / "entity_tracking_fast") if et_results is not None else None
 
     # Reading
-    read_results: dict[str, dict[str, list[dict[str, str | int | float]]]] = _load_results(main_path / "reading" / "predictions.json")
-    assert _check_size("reading", read_results, True), "The Reading data is incorrect"
-    revision_results["reading"] = _calculate_reading_results(read_results, data_path / "reading" / "reading_data.csv")
+    read_results = _try_load_results(main_path / "reading" / "predictions.json", "Reading Fast", lambda r: _check_size("reading", r, True))
+    revision_results["reading"] = _calculate_reading_results(read_results, data_path / "reading" / "reading_data.csv") if read_results is not None else None
 
     return revision_results
 
