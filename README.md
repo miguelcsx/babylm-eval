@@ -52,15 +52,23 @@ We train GPT-2 baseline models on the datasets. We provide monolingual models, a
 Following [BabyBabelLM](https://arxiv.org/pdf/2510.10159), we divide evaluation for the multilingual models up in zero-shot and fine-tuning evaluation. Zero-shot evaluation for the multilingual track is done through `lm-eval`. Fine-tuning is adapted from a script of previous BabyLM editions.
 
 ### Strict / Strict-Small
-#### Zero-shot Tasks
+#### Zero-shot
 | task | gpt2-baseline-BabyLM-2026-Strict | gpt2-baseline-BabyLM-2026-Strict-Small |
 | --- | --- | --- |
 | zero_shot/blimp/blimp_filtered | **74.53** | 65.08 |
 | zero_shot/blimp/supplement_filtered | **65.00** | 57.25 |
 | zero_shot/comps/comps | **55.85** | 51.81 |
 | zero_shot/entity_tracking/entity_tracking | **23.58** | 21.07 |
-| zero_shot/wug_adj/wug_adj_nominalization | **0.62** | 0.56 |
-| zero_shot/wug_past/wug_past_tense | **0.19** | 0.16 |
+
+#### Finetune (GLUE)
+| task | gpt2-baseline-BabyLM-2026-Strict | gpt2-baseline-BabyLM-2026-Strict-Small |
+| --- | --- | --- |
+| boolq (accuracy) | **67.46** | 65.87 |
+| mnli (accuracy) | **59.94** | 49.80 |
+| mrpc (f1) | **84.35** | 83.49 |
+| multirc (accuracy) | 63.90 | **64.52** |
+| qqp (f1) | **70.73** | 60.86 |
+| rte (accuracy) | 56.83 | **60.43** |
 
 ### Multilingual Track
 #### Zero-shot Tasks
