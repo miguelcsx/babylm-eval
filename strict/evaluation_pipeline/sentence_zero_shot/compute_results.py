@@ -12,7 +12,11 @@ from collections import Counter, defaultdict
 from tqdm import tqdm
 import argparse
 
-DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+DEVICE = (
+    torch.device('cuda') if torch.cuda.is_available()
+    else torch.device('mps') if torch.backends.mps.is_available()
+    else torch.device('cpu')
+)
 
 
 def compute_results(args: argparse.ArgumentParser, model: torch.nn.Module, dataloader: DataLoader, temperatures: list[float]):
@@ -32,7 +36,7 @@ def compute_results(args: argparse.ArgumentParser, model: torch.nn.Module, datal
         dict[int, dict[str, list]]: Prediction dictionary mapping datapoint uids to model predictions for each temperature
     """
 
-    with torch.no_grad():
+    with torch.inference_mode():
         if args.backend == "causal":
             return compute_causal_results(args, model, dataloader, temperatures)
         elif args.backend in ["mlm", "mntp"]:

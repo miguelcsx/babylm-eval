@@ -2,26 +2,39 @@
 # ----------------------
 from __future__ import annotations
 
-import pathlib
-import json
 import argparse
+import copy
+import json
+import pathlib
 from _io import TextIOWrapper
 
-from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoModelForSeq2SeqLM
 import torch
+from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoModelForSeq2SeqLM
 
-from evaluation_pipeline.sentence_zero_shot.dataset import get_dataloader
 from evaluation_pipeline.sentence_zero_shot.compute_results import compute_results
+from evaluation_pipeline.sentence_zero_shot.dataset import get_dataloader
 
-DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+DEVICE = (
+    torch.device('cuda') if torch.cuda.is_available()
+    else torch.device('mps') if torch.backends.mps.is_available()
+    else torch.device('cpu')
+)
+
+_FAST_TASKS: list[tuple[str, str]] = [
+    ("blimp", "evaluation_data/fast_eval/blimp_fast"),
+    ("blimp", "evaluation_data/fast_eval/supplement_fast"),
+    ("ewok", "evaluation_data/fast_eval/ewok_fast"),
+    ("entity_tracking", "evaluation_data/fast_eval/entity_tracking_fast"),
+    ("comps", "evaluation_data/full_eval/comps"),
+]
 
 
 def _parse_arguments():
     parser = argparse.ArgumentParser()
 
     # Required parameters
-    parser.add_argument("--data_path", required=True, type=pathlib.Path, help="Path to the data directory")
-    parser.add_argument("--task", required=True, type=str, help="The task that is being evaluated.", choices=["blimp", "ewok", "entity_tracking", "comps", "vqa", "winoground"])
+    parser.add_argument("--data_path", default=None, type=pathlib.Path, help="Path to the data directory")
+    parser.add_argument("--task", default=None, type=str, help="The task that is being evaluated.", choices=["blimp", "ewok", "entity_tracking", "comps", "vqa", "winoground"])
     parser.add_argument("--model_path_or_name", required=True, type=str, help="Path to the model to evaluate.")
     parser.add_argument("--backend", required=True, type=str, help="The evaluation backend strategy", choices=["mlm", "causal", "mntp", "enc_dec_mask", "enc_dec_prefix"])
 
@@ -39,6 +52,9 @@ def _parse_arguments():
     parser.add_argument("--non_causal_batch_size", default=64, type=int, help="Mini-batch size to process each batch of inputs involving masked tokens")
     parser.add_argument("--full_sentence_scores", action="store_true", help="Whether to use the entire sentence to calculate the sentence scores rather than just the completion. (Only implemented for EWoK)")
     parser.add_argument("--save_predictions", action="store_true", help="Whether or not to save predictions.")
+
+    parser.add_argument("--all-fast", dest="all_fast", action="store_true",
+                        help="Run all fast evaluation tasks with a single model load.")
 
     return parser.parse_args()
 
@@ -140,26 +156,19 @@ def save_predictions(args, predictions, best_temp):
         json.dump(predictions[best_temp], f)
 
 
-def main():
-    args = _parse_arguments()
-    if args.images_path is not None:
-        assert args.batch_size == 1, "Multimodal only works in batch size 1!"
-    dataset = args.data_path.stem
-    args.model_name = pathlib.Path(args.model_path_or_name).stem
-    if args.revision_name is None:
-        revision_name = "main"
-    else:
-        revision_name = args.revision_name
-    args.output_path = args.output_dir / args.model_name / revision_name / "zero_shot" / args.backend / args.task / dataset
+def _run_single_task(args: argparse.Namespace, model) -> None:
+    """Evaluate one task and write reports/predictions to args.output_path."""
+    revision_name = args.revision_name or "main"
+    args.output_path = (
+        args.output_dir / args.model_name / revision_name
+        / "zero_shot" / args.backend / args.task / args.data_path.stem
+    )
     args.output_path.mkdir(parents=True, exist_ok=True)
 
-    # Get results
-    model = get_model(args)
     dataloader = get_dataloader(args)
     temperatures = get_temperatures(args)
     results, predictions = compute_results(args, model, dataloader, temperatures)
 
-    # Process results
     accuracies, average_accuracies = process_results(args, results)
     best_acc = -1
     best_temp = -1
@@ -170,14 +179,31 @@ def main():
             best_temp = temperature
     print()
 
-    # Report and save
     create_evaluation_report(best_temp, average_accuracies[best_temp], accuracies[best_temp], task=args.task)
     with (args.output_path / "best_temperature_report.txt").open("w") as f:
         create_evaluation_report(best_temp, average_accuracies[best_temp], accuracies[best_temp], task=args.task, file=f)
 
-    # Save predictions
     if args.save_predictions:
         save_predictions(args, predictions, best_temp)
+
+
+def main():
+    args = _parse_arguments()
+    if args.images_path is not None:
+        assert args.batch_size == 1, "Multimodal only works in batch size 1!"
+
+    args.model_name = pathlib.Path(args.model_path_or_name).stem
+    model = get_model(args)
+
+    if args.all_fast:
+        for task, data_path in _FAST_TASKS:
+            task_args = copy.copy(args)
+            task_args.task = task
+            task_args.data_path = pathlib.Path(data_path)
+            task_args.save_predictions = True
+            _run_single_task(task_args, model)
+    else:
+        _run_single_task(args, model)
 
 
 if __name__ == "__main__":
