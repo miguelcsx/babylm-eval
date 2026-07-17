@@ -11,14 +11,9 @@ from _io import TextIOWrapper
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoModelForSeq2SeqLM
 
+from evaluation_pipeline.device import resolve_device, write_runtime_info
 from evaluation_pipeline.sentence_zero_shot.compute_results import compute_results
 from evaluation_pipeline.sentence_zero_shot.dataset import get_dataloader
-
-DEVICE = (
-    torch.device('cuda') if torch.cuda.is_available()
-    else torch.device('mps') if torch.backends.mps.is_available()
-    else torch.device('cpu')
-)
 
 _FAST_TASKS: list[tuple[str, str]] = [
     ("blimp", "evaluation_data/fast_eval/blimp_fast"),
@@ -53,6 +48,10 @@ def _parse_arguments():
     parser.add_argument("--non_causal_batch_size", default=64, type=int, help="Mini-batch size to process each batch of inputs involving masked tokens")
     parser.add_argument("--full_sentence_scores", action="store_true", help="Whether to use the entire sentence to calculate the sentence scores rather than just the completion. (Only implemented for EWoK)")
     parser.add_argument("--save_predictions", action="store_true", help="Whether or not to save predictions.")
+    parser.add_argument(
+        "--device", default="auto",
+        help="Execution device: auto, rocm, cuda, cuda:N, mps, or cpu.",
+    )
 
     parser.add_argument("--all-fast", dest="all_fast", action="store_true",
                         help="Run all fast evaluation tasks with a single model load.")
@@ -69,7 +68,7 @@ def get_model(args: argparse.ArgumentParser):
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model_path_or_name, trust_remote_code=True, revision=args.revision_name)
     else:
         raise f"The backend {args.backend} is not implemented, please implemented yourself or raise an issue on the GitHub!"
-    model = model.to(DEVICE)
+    model = model.to(args.device)
     model.eval()
 
     return model
@@ -165,6 +164,7 @@ def _run_single_task(args: argparse.Namespace, model) -> None:
         / "zero_shot" / args.backend / args.task / args.data_path.stem
     )
     args.output_path.mkdir(parents=True, exist_ok=True)
+    write_runtime_info(args.output_path / "runtime.json", args.device)
 
     dataloader = get_dataloader(args)
     temperatures = get_temperatures(args)
@@ -190,6 +190,7 @@ def _run_single_task(args: argparse.Namespace, model) -> None:
 
 def main():
     args = _parse_arguments()
+    args.device = resolve_device(args.device)
     if args.images_path is not None:
         assert args.batch_size == 1, "Multimodal only works in batch size 1!"
 

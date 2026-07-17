@@ -12,17 +12,10 @@ from collections import Counter, defaultdict
 from tqdm import tqdm
 import argparse
 
-DEVICE = (
-    torch.device('cuda') if torch.cuda.is_available()
-    else torch.device('mps') if torch.backends.mps.is_available()
-    else torch.device('cpu')
-)
-
 # Tasks whose candidates are scored by length-normalized completion log-probability
 # (sum of completion-token log-probs divided by the number of completion tokens)
 # rather than the raw summed completion log-probability used by every other task.
 LENGTH_NORMALIZED_TASKS = {"global_piqa_parallel", "global_piqa_nonparallel"}
-
 
 def compute_results(args: argparse.ArgumentParser, model: torch.nn.Module, dataloader: DataLoader, temperatures: list[float]):
     """This function takes as input a model, a dataloader for a given evaluation task and
@@ -109,14 +102,14 @@ def compute_causal_results(args, model, dataloader, temperatures):
         for prefix in prefixes:
             if no_image:
                 logits = model(
-                    input_ids=sentence_dict[f"{prefix}_inputs"].to(DEVICE),
-                    attention_mask=sentence_dict[f"{prefix}_attn_mask"].to(DEVICE),
+                    input_ids=sentence_dict[f"{prefix}_inputs"].to(args.device),
+                    attention_mask=sentence_dict[f"{prefix}_attn_mask"].to(args.device),
                 )
             else:
                 logits = model(
-                    input_ids=sentence_dict[f"{prefix}_inputs"].to(DEVICE),
-                    attention_mask=sentence_dict[f"{prefix}_attn_mask"].to(DEVICE),
-                    pixel_values=images.to(DEVICE),
+                    input_ids=sentence_dict[f"{prefix}_inputs"].to(args.device),
+                    attention_mask=sentence_dict[f"{prefix}_attn_mask"].to(args.device),
+                    pixel_values=images.to(args.device),
                 )
             if isinstance(logits, tuple):
                 logits = logits[0]  # BxTxV
@@ -128,8 +121,8 @@ def compute_causal_results(args, model, dataloader, temperatures):
 
             for temp in subset_to_stats:
                 log_probs = F.log_softmax(logits / temp, dim=-1)
-                target_log_probs = torch.gather(log_probs, -1, sentence_dict[f"{prefix}_targets"].to(DEVICE).unsqueeze(-1)).squeeze(-1)
-                phrase_mask = sentence_dict[f"{prefix}_phrase_mask"].to(DEVICE)
+                target_log_probs = torch.gather(log_probs, -1, sentence_dict[f"{prefix}_targets"].to(args.device).unsqueeze(-1)).squeeze(-1)
+                phrase_mask = sentence_dict[f"{prefix}_phrase_mask"].to(args.device)
                 phrase_log_probs = torch.sum(target_log_probs * phrase_mask, dim=1)
                 if args.task in LENGTH_NORMALIZED_TASKS:
                     phrase_log_probs = phrase_log_probs / torch.sum(phrase_mask, dim=1).clamp(min=1)
@@ -172,10 +165,10 @@ def compute_mlm_results(args, model, dataloader, temperatures):
             individual_log_probs = {temp : [] for temp in subset_to_stats}
             for batch_idx in range(num_batches):
                 # Construct minibatch
-                tokens = sentence_dict[f"{prefix}_tokens"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                attn_mask = sentence_dict[f"{prefix}_attn_mask"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                indices = sentence_dict[f"{prefix}_indices"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                targets = sentence_dict[f"{prefix}_targets"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
+                tokens = sentence_dict[f"{prefix}_tokens"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                attn_mask = sentence_dict[f"{prefix}_attn_mask"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                indices = sentence_dict[f"{prefix}_indices"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                targets = sentence_dict[f"{prefix}_targets"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
 
                 # Do the log-probs
                 if no_image:
@@ -187,7 +180,7 @@ def compute_mlm_results(args, model, dataloader, temperatures):
                     logits = model(
                         input_ids=tokens,
                         attention_mask=attn_mask,
-                        pixel_values=images.to(DEVICE),
+                        pixel_values=images.to(args.device),
                     )
                 if isinstance(logits, tuple):
                     logits = logits[0]  # BxTxV
@@ -197,7 +190,7 @@ def compute_mlm_results(args, model, dataloader, temperatures):
                 if logits.size(1) != sentence_dict[f"{prefix}_tokens"].size(1):  # Assumption is that images are prepended to the text when done post-tokenization.
                     logits = logits[:, -sentence_dict[f"{prefix}_tokens"].size(1):]
 
-                minibatch_indices = torch.arange(logits.shape[0]).to(DEVICE)
+                minibatch_indices = torch.arange(logits.shape[0]).to(args.device)
                 masked_logits = logits[minibatch_indices, indices]  # BxV
 
                 for temp in subset_to_stats:
@@ -258,11 +251,11 @@ def compute_enc_dec_mask_results(args, model, dataloader, temperatures):
             individual_log_probs = {temp : [] for temp in subset_to_stats}
             for batch_idx in range(num_batches):
                 # Construct minibatch
-                tokens = sentence_dict[f"{prefix}_enc_tokens"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                attn_mask = sentence_dict[f"{prefix}_enc_attn_mask"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                dec_input_ids = sentence_dict[f"{prefix}_dec_tokens"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                dec_attn_mask = sentence_dict[f"{prefix}_dec_attn_mask"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
-                targets = sentence_dict[f"{prefix}_targets"][batch_idx*bsz:(batch_idx+1)*bsz].to(DEVICE)
+                tokens = sentence_dict[f"{prefix}_enc_tokens"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                attn_mask = sentence_dict[f"{prefix}_enc_attn_mask"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                dec_input_ids = sentence_dict[f"{prefix}_dec_tokens"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                dec_attn_mask = sentence_dict[f"{prefix}_dec_attn_mask"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
+                targets = sentence_dict[f"{prefix}_targets"][batch_idx*bsz:(batch_idx+1)*bsz].to(args.device)
 
                 # Do the log-probs
                 if no_image:
@@ -278,7 +271,7 @@ def compute_enc_dec_mask_results(args, model, dataloader, temperatures):
                         attention_mask=attn_mask,
                         decoder_input_ids=dec_input_ids,
                         decoder_attention_mask=dec_attn_mask,
-                        pixel_values=images.to(DEVICE),
+                        pixel_values=images.to(args.device),
                     )
                 if isinstance(logits, tuple):
                     logits = logits[0]  # BxTxV
@@ -339,18 +332,18 @@ def compute_enc_dec_prefix_results(args, model, dataloader, temperatures):
         for prefix in prefixes:
             if no_image:
                 logits = model(
-                    input_ids=sentence_dict[f"{prefix}_enc_tokens"].to(DEVICE),
-                    attention_mask=sentence_dict[f"{prefix}_enc_attn_mask"].to(DEVICE),
-                    decoder_input_ids=sentence_dict[f"{prefix}_dec_tokens"].to(DEVICE),
-                    decoder_attention_mask=sentence_dict[f"{prefix}_dec_attn_mask"].to(DEVICE),
+                    input_ids=sentence_dict[f"{prefix}_enc_tokens"].to(args.device),
+                    attention_mask=sentence_dict[f"{prefix}_enc_attn_mask"].to(args.device),
+                    decoder_input_ids=sentence_dict[f"{prefix}_dec_tokens"].to(args.device),
+                    decoder_attention_mask=sentence_dict[f"{prefix}_dec_attn_mask"].to(args.device),
                 )
             else:
                 logits = model(
-                    input_ids=sentence_dict[f"{prefix}_enc_tokens"].to(DEVICE),
-                    attention_mask=sentence_dict[f"{prefix}_enc_attn_mask"].to(DEVICE),
-                    decoder_input_ids=sentence_dict[f"{prefix}_dec_tokens"].to(DEVICE),
-                    decoder_attention_mask=sentence_dict[f"{prefix}_dec_attn_mask"].to(DEVICE),
-                    pixel_values=images.to(DEVICE),
+                    input_ids=sentence_dict[f"{prefix}_enc_tokens"].to(args.device),
+                    attention_mask=sentence_dict[f"{prefix}_enc_attn_mask"].to(args.device),
+                    decoder_input_ids=sentence_dict[f"{prefix}_dec_tokens"].to(args.device),
+                    decoder_attention_mask=sentence_dict[f"{prefix}_dec_attn_mask"].to(args.device),
+                    pixel_values=images.to(args.device),
                 )
             if isinstance(logits, tuple):
                 logits = logits[0]  # BxTxV
@@ -360,8 +353,8 @@ def compute_enc_dec_prefix_results(args, model, dataloader, temperatures):
             for temp in subset_to_stats:
                 log_probs = F.log_softmax(logits / temp, dim=-1)
                 start_pred_token = log_probs.size(1) - sentence_dict[f"{prefix}_targets"].size(1)
-                target_log_probs = torch.gather(log_probs[:, start_pred_token:], -1, sentence_dict[f"{prefix}_targets"].to(DEVICE).unsqueeze(-1)).squeeze(-1)
-                phrase_mask = sentence_dict[f"{prefix}_phrase_mask"].to(DEVICE)
+                target_log_probs = torch.gather(log_probs[:, start_pred_token:], -1, sentence_dict[f"{prefix}_targets"].to(args.device).unsqueeze(-1)).squeeze(-1)
+                phrase_mask = sentence_dict[f"{prefix}_phrase_mask"].to(args.device)
                 phrase_log_probs = torch.sum(target_log_probs * phrase_mask, dim=1)
                 if args.task in LENGTH_NORMALIZED_TASKS:
                     phrase_log_probs = phrase_log_probs / torch.sum(phrase_mask, dim=1).clamp(min=1)

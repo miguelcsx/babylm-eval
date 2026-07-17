@@ -10,11 +10,7 @@ import math
 import json
 import torch
 
-DEVICE = (
-    torch.device('cuda') if torch.cuda.is_available()
-    else torch.device('mps') if torch.backends.mps.is_available()
-    else torch.device('cpu')
-)
+from evaluation_pipeline.device import resolve_device, write_runtime_info
 
 
 def parse_args():
@@ -27,9 +23,14 @@ def parse_args():
     parser.add_argument("--backend", required=True, type=str, help="The evaluation backend strategy.", choices=["mlm", "mntp", "causal", "enc_dec"])
     parser.add_argument("--number_of_mask_tokens_to_append", default=3, type=int, help="When using either mlm or mntp, the number of mask tokens to append to approximate causal generation.")
     parser.add_argument("--revision_name", default=None, type=str, help="Name of the checkpoint/version of the model to test. (If None, the main will be used)")
+    parser.add_argument(
+        "--device", default="auto",
+        help="Execution device: auto, rocm, cuda, cuda:N, mps, or cpu.",
+    )
 
     args = parser.parse_args()
 
+    args.device = resolve_device(args.device)
     args.model_name = pathlib.Path(args.model_path_or_name).stem
     args.output_dir /= args.model_name
     if args.revision_name is None:
@@ -41,6 +42,7 @@ def parse_args():
     args.output_dir /= "reading"
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_runtime_info(args.output_dir / "runtime.json", args.device)
 
     return args
 
@@ -58,7 +60,7 @@ if __name__ == "__main__":
     elif args.backend == "enc_dec":
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model_path_or_name, trust_remote_code=True, revision=args.revision_name)
 
-    model.to(DEVICE)
+    model.to(args.device)
     model.eval()
     try:
         tokenizer = AutoProcessor.from_pretrained(args.model_path_or_name, trust_remote_code=True, revision=args.revision_name)
@@ -90,11 +92,11 @@ if __name__ == "__main__":
             except Exception:
                 print(row)
                 exit()
-            prev_p2.append(-math.log(prev_p))
+            prev_p2.append(-math.log(max(prev_p, 1e-12)))
         else:
             prev_p2.append(float("NaN"))
 
-    p2 = [-math.log(p) for p in out]
+    p2 = [-math.log(max(p, 1e-12)) for p in out]
 
     df["pred"] = p2
     df["prev_pred"] = prev_p2

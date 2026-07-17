@@ -11,6 +11,7 @@ from transformers import AutoTokenizer
 from evaluation_pipeline.AoA_word.eval_util import JsonProcessor, StepConfig, load_eval
 from evaluation_pipeline.AoA_word.evaluation_functions import StepSurprisalExtractor
 from evaluation_pipeline.utils import AoAEvaluator
+from evaluation_pipeline.device import resolve_device, write_runtime_info
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -63,6 +64,10 @@ def parse_args() -> argparse.Namespace:
         "--debug", action="store_true", help="Compute the first 5 lines if enabled"
     )
     parser.add_argument(
+        "--device", default="auto",
+        help="Execution device: auto, rocm, cuda, cuda:N, mps, or cpu.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Resume results from the existing checkpoint",
@@ -92,7 +97,7 @@ def config_paths(args) -> tuple[Path, Path | None]:
     else:
         resume_file = None
 
-    return result_file, resume_file
+    return full_output_dir, result_file, resume_file
 
 
 def save_results(results_data: dict, result_file: Path) -> None:
@@ -112,10 +117,11 @@ def save_results(results_data: dict, result_file: Path) -> None:
 def main() -> None:
     """Main function demonstrating usage."""
     args = parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = resolve_device(args.device)
 
     target_words, contexts = load_eval(args.word_path, args.min_context, args.debug)
-    result_file, resume_file = config_paths(args)
+    output_dir, result_file, resume_file = config_paths(args)
+    write_runtime_info(output_dir / "runtime.json", device)
 
     steps_config = StepConfig(
         resume=args.resume,
@@ -128,7 +134,7 @@ def main() -> None:
         config=steps_config,
         model_name=args.model_name,
         backend=args.backend,
-        device=device,
+        device=str(device),
     )
 
     logger.info("Computing surprisal across training steps")

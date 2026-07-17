@@ -7,6 +7,7 @@ import pathlib
 
 from evaluation_pipeline.finetune.trainer import Trainer
 from evaluation_pipeline.finetune.utils import seed_everything
+from evaluation_pipeline.device import resolve_device, write_runtime_info
 
 from typing import TYPE_CHECKING
 
@@ -37,6 +38,10 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--metric_for_valid", type=str, help="The metric used to compare the model when finding the best model.", choices=["accuracy", "mcc", "f1"])
     parser.add_argument("--higher_is_better", action=argparse.BooleanOptionalAction, default=True, help="Wheter a higher value for the metric for valid is better or not.")
     parser.add_argument("--revision_name", default=None, type=str, help="Name of the checkpoint/version of the model to test. (If None, the main will be used)")
+    parser.add_argument(
+        "--device", default="auto",
+        help="Execution device: auto, rocm, cuda, cuda:N, mps, or cpu.",
+    )
 
     # Hyperparameters
     parser.add_argument("--batch_size", default=16, type=int, help="The batch size for each step during fine-tuning.")
@@ -83,7 +88,7 @@ if __name__ == "__main__":
     args: Namespace = _parse_arguments()
 
     seed_everything(args.seed)
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = resolve_device(args.device)
 
     model_name: str = args.model_name
     if args.task == "mnli":
@@ -97,6 +102,7 @@ if __name__ == "__main__":
         revision_name = args.revision_name
     output_path: pathlib.Path = args.results_dir / model_name / revision_name / "finetune" / args.task
     output_path.mkdir(parents=True, exist_ok=True)
+    write_runtime_info(output_path / "runtime.json", device)
     if args.save:
         args.save_path: pathlib.Path = args.save_dir / model_name / args.task
         args.save_path.mkdir(parents=True, exist_ok=True)

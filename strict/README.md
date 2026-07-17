@@ -42,6 +42,21 @@ To set up and run the evaluation:
 
 To be able to use the pipeline you need to install the `requirements.txt` packages.
 
+### AMD ROCm
+
+Install a ROCm PyTorch wheel before the remaining requirements. The relaxed
+PyTorch constraint in `requirements.txt` preserves that build instead of
+replacing it with a non-ROCm wheel. For example, on a ROCm 6.3 host:
+
+```bash
+python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/rocm6.2.4
+python -m pip install -r requirements.txt
+```
+
+Evaluation commands accept `--device rocm` (or `cuda:N`). PyTorch exposes AMD
+GPUs through its CUDA-compatible API; every result directory records
+`runtime.json` with `backend: rocm`, the HIP version, and the selected GPU.
+
 > [!Warning]
 > These packages were installed using Python 3.13, in case some of the packages are not compatible with your Python version (either because the version is too recent or is not supported). In that case, you could either update your Python version or pip/conda install the following packages: `transformers`, `torch`, `scikit-learn`, `numpy`, `pandas`, `statsmodels`, `datasets`, `wandb`, and `nltk`.
 

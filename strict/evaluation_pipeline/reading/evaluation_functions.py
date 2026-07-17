@@ -3,19 +3,15 @@ import torch
 
 from evaluation_pipeline.utils import get_logits
 
-DEVICE = (
-    torch.device("cuda")
-    if torch.cuda.is_available()
-    else torch.device("mps")
-    if torch.backends.mps.is_available()
-    else torch.device("cpu")
-)
+
+def _device(model: torch.nn.Module) -> torch.device:
+    return next(model.parameters()).device
 
 
 def get_p(
     sentence, word, model, tokenizer
 ):  # gets p of word (word) given context. Relies on model and tokenizer.
-    inpts = tokenizer(sentence, return_tensors="pt").to(DEVICE)
+    inpts = tokenizer(sentence, return_tensors="pt").to(_device(model))
     with torch.no_grad():
         outputs = model(**inpts)
         logits = get_logits(outputs)[:, -1, :].cpu()
@@ -32,7 +28,7 @@ def get_p_mntp(
             [sentence, "".join([tokenizer.mask_token for _ in range(num_mask_tokens)])]
         ),
         return_tensors="pt",
-    ).to(DEVICE)
+    ).to(_device(model))
     position_of_pred = (
         -(num_mask_tokens + 1)
         if inpts.input_ids[:, -1] == tokenizer.mask_token_id
@@ -54,7 +50,7 @@ def get_p_mlm(
             [sentence, "".join([tokenizer.mask_token for _ in range(num_mask_tokens)])]
         ),
         return_tensors="pt",
-    ).to(DEVICE)
+    ).to(_device(model))
     position_of_pred = (
         -num_mask_tokens
         if inpts.input_ids[:, -1] == tokenizer.mask_token_id
@@ -104,10 +100,10 @@ def get_p_enc_dec(
     dec_attention_mask = dec_inpts["attention_mask"]
     with torch.no_grad():
         outputs = model(
-            input_ids=input_ids.to(DEVICE),
-            attention_mask=attention_mask.to(DEVICE),
-            decoder_input_ids=dec_input_ids.to(DEVICE),
-            decoder_attention_mask=dec_attention_mask.to(DEVICE),
+            input_ids=input_ids.to(_device(model)),
+            attention_mask=attention_mask.to(_device(model)),
+            decoder_input_ids=dec_input_ids.to(_device(model)),
+            decoder_attention_mask=dec_attention_mask.to(_device(model)),
         )
         logits = get_logits(outputs)[:, 0, :].cpu()
     target_id = tokenizer(word, add_special_tokens=False)["input_ids"][0]
@@ -118,7 +114,7 @@ def get_p_enc_dec(
 def get_p2(
     sentence, word, model, tokenizer
 ):  # as get_p if len(tokenizer(word)) == 1; else, sums logP of subword tokens
-    inpts = tokenizer(sentence, return_tensors="pt").to(DEVICE)
+    inpts = tokenizer(sentence, return_tensors="pt").to(_device(model))
     with torch.no_grad():
         outputs = model(**inpts)
         logits = get_logits(outputs)[:, -1, :].cpu()
@@ -153,7 +149,7 @@ def get_p2_mlm(
             [sentence, "".join([tokenizer.mask_token for _ in range(num_mask_tokens)])]
         ),
         return_tensors="pt",
-    ).to(DEVICE)
+    ).to(_device(model))
     position_of_pred = (
         -num_mask_tokens
         if inpts.input_ids[:, -1] == tokenizer.mask_token_id
@@ -193,7 +189,7 @@ def get_p2_mntp(
             [sentence, "".join([tokenizer.mask_token for _ in range(num_mask_tokens)])]
         ),
         return_tensors="pt",
-    ).to(DEVICE)
+    ).to(_device(model))
     position_of_pred = (
         -(num_mask_tokens + 1)
         if inpts.input_ids[:, -1] == tokenizer.mask_token_id
@@ -261,10 +257,10 @@ def get_p2_enc_dec(
     dec_attention_mask = dec_inpts["attention_mask"]
     with torch.no_grad():
         outputs = model(
-            input_ids=input_ids.to(DEVICE),
-            attention_mask=attention_mask.to(DEVICE),
-            decoder_input_ids=dec_input_ids.to(DEVICE),
-            decoder_attention_mask=dec_attention_mask.to(DEVICE),
+            input_ids=input_ids.to(_device(model)),
+            attention_mask=attention_mask.to(_device(model)),
+            decoder_input_ids=dec_input_ids.to(_device(model)),
+            decoder_attention_mask=dec_attention_mask.to(_device(model)),
         )
         logits = get_logits(outputs)[:, 0, :].cpu()
     target = tokenizer(word, add_special_tokens=False)[
